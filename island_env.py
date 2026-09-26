@@ -18,7 +18,7 @@ class IslandCityEnv(gym.Env):
         self.H = height
         self.W = width
         self.max_steps = max_steps
-        
+        self.market_range = 8
         
         # Footprint sizes: (height, width)
         self.BUILDING_SIZES = {
@@ -53,14 +53,15 @@ class IslandCityEnv(gym.Env):
         # Unique IDs map to track multi-tile house/market instances
         self.instance_grid = np.zeros((self.H, self.W), dtype=np.int32)
         self.next_instance_id = 1
-        
-        # Road distance map 
-        self.dist_map = np.zeros((self.H, self.W), dtype=np.float32)
+        #temporary only for houses and relevan distances to markets
+        self.instance_dict = {}
+        # Road and house distance map 
+        self.dist_map = np.full((self.H, self.W), 99.9, dtype=np.float32)
 
         # SEEDED START: Pre-place 1 Market and 1 adjacent Road in the center
         mid_y, mid_x = self.H // 2 - 1, self.W // 2 - 1
-        self._place_building_tiles(mid_y, mid_x, 2) # Market (1x1)
-        self._place_building_tiles(mid_y + 1, mid_x, 0) # Road (1x1)
+        self._building_agent(mid_y, mid_x, 2) # Market (1x1)
+        self._building_agent(mid_y + 1, mid_x, 0) # Road (1x1)
         
         #self._update_distances_and_score() 
         return self._get_obs(), {"action_mask": self.action_masks()}
@@ -76,7 +77,43 @@ class IslandCityEnv(gym.Env):
         # Normalize distance channel to [0, 1] relative to max scoring range (15)
         #obs[4] = self.dist_map
         return obs
+    def _building_agent(self, y, x, btype) -> float: # returns change in score
+        self._place_building_tiles(y, x, btype)
+        score_change = 0
+        if btype == 0:
+            min_dist_to_market = self.market_range*999
+            for dy, dx in [(-1,0), (1,0), (0,-1), (0,1)]:
+                ny, nx = y + dy, x + dx
+                if 0 <= ny < self.H and 0 <= nx < self.W and self.building_grid[ny, nx] == 1:
+                    min_dist_to_market = min(min_dist_to_market, self.dist_map[ny, nx] + 1)
+            self.dist_map[y, x] = min_dist_to_market
+            queue = deque()
+            queue.append((y, x))
+            # BFS over roads that have new shortest connection to market
+            while queue:
+                y, x = queue.popleft()
+                dist = self.dist_map[y, x]
+                for dy, dx in [(-1,0), (1,0), (0,-1), (0,1)]: 
+                    ny, nx = y + dy, x + dx
+                    if 0 <= ny < self.H and 0 <= nx < self.W :
+                        cur_building = self.building_grid[ny, nx] 
+                        if cur_building == 1 and self.dist_map[ny, nx] > dist + 1: # check if neighbour roads are now closer to market
+                            queue.append((ny, nx))
+                            self.dist_map[ny, nx] = dist + 1
+                        elif cur_building == 2 and self.instance_dict[self.instance_grid[ny, nx]] > dist: # check if neighbour houses are now closer to market
+                            score_change += self._normalize_house_reward(self.instance_dict[self.instance_grid[ny, nx]]) - self._normalize_house_reward(dist)
+                            self.instance_dict[self.instance_grid[ny, nx]] = dist
 
+        elif btype == 1:
+            bh, bw = self.BUILDING_SIZES[btype]
+            neighbors = self._get_orthogonal_neighbors((self.building_grid == 1),x,y,bw,bh)
+            min_dist_to_market = self.market_range*999
+            for nx, ny in neighbors:
+                if self.building_grid[ny, nx] == 1:
+                    min_dist_to_market = min(min_dist_to_market, self.dist_map[ny, nx])
+            self.instance_dict[self.next_instance_id - 1] = min_dist_to_market
+            score_change += self._normalize_house_reward(min_dist_to_market)
+        return score_change
     def action_masks(self) -> np.ndarray:
         mask = np.zeros(self.action_space.n, dtype=bool)
         
@@ -117,6 +154,9 @@ class IslandCityEnv(gym.Env):
                         pass
                         #mask[idx] = True     
         return mask
+    
+    def _normalize_house_reward(self, distance) -> float:
+        return min(max(0, distance - self.market_range), self.market_range) / 8
 
     def step(self, action):
         self.current_step += 1
@@ -129,7 +169,7 @@ class IslandCityEnv(gym.Env):
         bh, bw = self.BUILDING_SIZES[btype]
         
         # Execute action
-        self._place_building_tiles(y, x, btype)
+        reward = self._building_agent(y, x, btype)
             
         # Re-evaluate pathfinding & score
         old_score = self.total_score
@@ -138,7 +178,6 @@ class IslandCityEnv(gym.Env):
         # Delta reward calculation (-0.01 step penalty to discourage endless loops)
         #reward = (new_score - old_score) - 0.01
         #reward = (new_score - old_score)
-        reward = 1 if btype == 1 else 0
         new_score = old_score + reward
         self.total_score = new_score
 
@@ -176,6 +215,43 @@ class IslandCityEnv(gym.Env):
             return True
 
         return False
+    def _get_orthogonal_neighbors(self, grid, x, y, bw, bh):
+        """Returns a list of (x, y) coordinates for all orthogonal neighbor cells that are True."""
+        neighbors = []
+
+        # Top edge
+        if y > 0:
+            x_end = min(self.W, x + bw)
+            row = grid[y - 1, x:x_end]
+            for offset, val in enumerate(row):
+                if val:
+                    neighbors.append((x + offset, y - 1))
+
+        # Bottom edge
+        if y + bh < self.H:
+            x_end = min(self.W, x + bw)
+            row = grid[y + bh, x:x_end]
+            for offset, val in enumerate(row):
+                if val:
+                    neighbors.append((x + offset, y + bh))
+
+        # Left edge
+        if x > 0:
+            y_end = min(self.H, y + bh)
+            col = grid[y:y_end, x - 1]
+            for offset, val in enumerate(col):
+                if val:
+                    neighbors.append((x - 1, y + offset))
+
+        # Right edge
+        if x + bw < self.W:
+            y_end = min(self.H, y + bh)
+            col = grid[y:y_end, x + bw]
+            for offset, val in enumerate(col):
+                if val:
+                    neighbors.append((x + bw, y + offset))
+
+        return neighbors
     def render(self):
         """Renders the current city layout to the terminal using ASCII/Emojis."""
         symbols = {
