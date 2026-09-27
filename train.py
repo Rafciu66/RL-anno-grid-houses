@@ -80,7 +80,7 @@ if __name__ == "__main__":
 
     # 4. Train Agent
     print("Training AI model...")
-    model.learn(total_timesteps=200_000)
+    model.learn(total_timesteps=50_000)
 
     # 5. Evaluate Trained Agent on a Single Environment
     eval_env = IslandCityEnv(height=10, width=10, max_steps=60)

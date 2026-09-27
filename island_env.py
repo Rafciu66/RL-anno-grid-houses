@@ -80,12 +80,15 @@ class IslandCityEnv(gym.Env):
     def _building_agent(self, y, x, btype) -> float: # returns change in score
         self._place_building_tiles(y, x, btype)
         score_change = 0
-        if btype == 0:
+        if btype == 0: # road
             min_dist_to_market = self.market_range*999
             for dy, dx in [(-1,0), (1,0), (0,-1), (0,1)]:
                 ny, nx = y + dy, x + dx
-                if 0 <= ny < self.H and 0 <= nx < self.W and self.building_grid[ny, nx] == 1:
-                    min_dist_to_market = min(min_dist_to_market, self.dist_map[ny, nx] + 1)
+                if 0 <= ny < self.H and 0 <= nx < self.W:
+                    if self.building_grid[ny, nx] == 1: #is next to other road:
+                        min_dist_to_market = min(min_dist_to_market, self.dist_map[ny, nx] + 1)
+                    elif self.building_grid[ny, nx] == 3:
+                        min_dist_to_market = 0
             self.dist_map[y, x] = min_dist_to_market
             queue = deque()
             queue.append((y, x))
@@ -101,7 +104,7 @@ class IslandCityEnv(gym.Env):
                             queue.append((ny, nx))
                             self.dist_map[ny, nx] = dist + 1
                         elif cur_building == 2 and self.instance_dict[self.instance_grid[ny, nx]] > dist: # check if neighbour houses are now closer to market
-                            score_change += self._normalize_house_reward(self.instance_dict[self.instance_grid[ny, nx]]) - self._normalize_house_reward(dist)
+                            score_change += self._normalize_house_reward(dist) - self._normalize_house_reward(self.instance_dict[self.instance_grid[ny, nx]])
                             self.instance_dict[self.instance_grid[ny, nx]] = dist
 
         elif btype == 1:
@@ -156,7 +159,7 @@ class IslandCityEnv(gym.Env):
         return mask
     
     def _normalize_house_reward(self, distance) -> float:
-        return min(max(0, distance - self.market_range), self.market_range) / 8
+        return 1 - min(max(0, distance - self.market_range), self.market_range) / 8
 
     def step(self, action):
         self.current_step += 1
@@ -262,7 +265,21 @@ class IslandCityEnv(gym.Env):
         }
         
         print(f"\n--- Step: {self.current_step}/{self.max_steps} | Score: {self.total_score:.2f} ---")
-        
+        #RED = "\033[31m"
+        #GREEN = "\033[32m"
+        #RESET = "\033[0m"
+        for y in range(self.H):
+            row_str = ""
+            for x in range(self.W):
+                btype = self.building_grid[y, x]
+                if btype == 1:
+                    row_str += str(self.dist_map[y, x])
+                elif btype == 2:
+                    row_str += str(self.instance_dict[self.instance_grid[y, x]])
+                else:
+                    row_str += symbols.get(btype, " ? ")
+                row_str += "|"
+            print(row_str)
         for y in range(self.H):
             row_str = ""
             for x in range(self.W):
