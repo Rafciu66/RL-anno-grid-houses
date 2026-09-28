@@ -162,6 +162,7 @@ class IslandCityEnv(gym.Env):
                         orthogonal_neighbors = self._get_orthogonal_neighbors(road_mask, x, y, bw, bh)
                         if len(orthogonal_neighbors) > 0:
                             will_be_deadend = False
+                            is_l_crossroad = False
                             for nx, ny in orthogonal_neighbors:
                                 neighbors_of_neighbor = self._get_orthogonal_neighbors(house_mask, nx, ny, 1, 1)
                                 roads_of_neighbor = self._get_orthogonal_neighbors(road_mask, nx, ny, 1, 1)
@@ -171,11 +172,12 @@ class IslandCityEnv(gym.Env):
                                 else:
                                     total_x, total_y = 0, 0
                                     for rx, ry in roads_of_neighbor:
-                                        total_x += rx - x # (x, y) = (+-1, +-1) means its L shaped crossroad which which must become 'T' or '+' Type
-                                        total_y += ry - y
-                                    if total_x != 0 and total_y != 0:
+                                        total_x += rx - nx # (x, y) = (+-1, +-1) means its L shaped crossroad which which must become 'T' or '+' Type
+                                        total_y += ry - ny
+                                    is_l_crossroad = (total_x != 0 and total_y != 0)
+                                    if is_l_crossroad:
                                         break # house cant be placed until L shape becomes + shape
-                            if not will_be_deadend:
+                            if not will_be_deadend and not is_l_crossroad:
                                 mask[idx] = True
                             
                     elif btype == 2: # MARKET: can be placed anywhere valid

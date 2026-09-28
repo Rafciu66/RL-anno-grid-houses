@@ -1,4 +1,5 @@
 import multiprocessing
+import subprocess
 import torch
 import torch.nn as nn
 import gymnasium as gym
@@ -10,6 +11,7 @@ from island_env import IslandCityEnv
 import re
 from contextlib import redirect_stdout
 from pathlib import Path
+
 GRID_HEIGHT = 20
 GRID_WIDTH = 20
 class CustomGridCNN(BaseFeaturesExtractor):
@@ -46,48 +48,83 @@ class MaskWrapper(gym.Wrapper):
     def action_masks(self):
         return self.env.action_masks()
 def save_model(model):
-        output_dir = Path("models")
-        output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = Path("models")
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Find all existing output(n).txt files and extract their numbers
-        existing_numbers = [0]
-        pattern = re.compile(r"^model\((\d+)\)\.txt$")
+    git_id = get_git_identifier()
 
-        for file in output_dir.glob("model(*).txt"):
-            match = pattern.match(file.name)
-            if match:
-                existing_numbers.append(int(match.group(1)))
+    # Pattern captures any digit inside model(N).txt, ignoring whatever prefix comes before it
+    pattern = re.compile(r".*model\((\d+)\)\.txt$")
 
-        # Determine the next file number
-        next_number = max(existing_numbers) + 1
-        next_filename = output_dir / f"model({next_number}).txt"
+    # Find the maximum ID across ALL files in output_dir matching model(N).txt
+    existing_numbers = [0]
+    for file in output_dir.glob("*model(*).txt"):
+        match = pattern.match(file.name)
+        if match:
+            existing_numbers.append(int(match.group(1)))
 
-        # Save the model
-        model.save(next_filename)
+    # Global increment: guaranteed to get a unique next number
+    next_number = max(existing_numbers) + 1
+    next_filename = output_dir / f"{git_id}_model({next_number}).txt"
+
+    # Save the model
+    model.save(next_filename)
 
 def print_to_txt(env, time_steps, time_elapsed, total_reward):
-        output_dir = Path("outputs")
-        output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = Path("outputs")
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Find all existing output(n).txt files and extract their numbers
-        existing_numbers = [0]
-        pattern = re.compile(r"^output\((\d+)\)\.txt$")
+    git_id = get_git_identifier()
 
-        for file in output_dir.glob("output(*).txt"):
-            match = pattern.match(file.name)
-            if match:
-                existing_numbers.append(int(match.group(1)))
+    # Pattern captures any digit inside output(N).txt, regardless of what prefix comes before it
+    pattern = re.compile(r".*output\((\d+)\)\.txt$")
 
-        # Determine the next file number
-        next_number = max(existing_numbers) + 1
-        next_filename = output_dir / f"output({next_number}).txt"
+    # Extract existing numbers across ALL files in output_dir matching output(N).txt
+    existing_numbers = [0]
+    for file in output_dir.glob("*output(*).txt"):
+        match = pattern.match(file.name)
+        if match:
+            existing_numbers.append(int(match.group(1)))
 
-        # Save the render output
-        with open(next_filename, "w", encoding="utf-8") as f:
-            with redirect_stdout(f):
-                print(f"Total Time Steps: {time_steps}, Time Elapsed: {time_elapsed}, Total Reward: {total_reward}")
-                env.render()
+    # Global increment: guaranteed to be unique across all tags/commits
+    next_number = max(existing_numbers) + 1
+    next_filename = output_dir / f"{git_id}_output({next_number}).txt"
 
+    # Save the render output
+    with open(next_filename, "w", encoding="utf-8") as f:
+        with redirect_stdout(f):
+            print(
+                f"Total Time Steps: {time_steps}, Time Elapsed: {time_elapsed}, Total Reward: {total_reward}"
+            )
+            env.render()
+def get_git_identifier() -> str:
+    """Retrieve the current Git tag, or fallback to the short commit hash / 'default'."""
+    try:
+        # First try to get the exact tag for the current commit
+        identifier = (
+            subprocess.check_output(
+                ["git", "describe", "--tags", "--exact-match"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode("utf-8")
+            .strip()
+        )
+    except Exception:
+        try:
+            # Fallback to short commit hash if no exact tag exists
+            identifier = (
+                subprocess.check_output(
+                    ["git", "rev-parse", "--short", "HEAD"],
+                    stderr=subprocess.DEVNULL,
+                )
+                .decode("utf-8")
+                .strip()
+            )
+        except Exception:
+            identifier = "default"
+
+    # Sanitize for valid file paths
+    return identifier.replace("/", "_")
 def make_env(height=10, width=10, max_steps=60):
     """Factory function to build worker environments."""
     def _init():
@@ -97,7 +134,7 @@ def make_env(height=10, width=10, max_steps=60):
 
 
 if __name__ == "__main__":
-    TIME_STEPS = 100_000
+    TIME_STEPS = 1_000
     start_time = time.perf_counter()
     # 1. Spawn parallel CPU environments
     num_cpu = max(1, multiprocessing.cpu_count() - 2)
