@@ -42,7 +42,7 @@ class MaskWrapper(gym.Wrapper):
         return self.env.action_masks()
 
 
-def make_env(height=10, width=10, max_steps=60):
+def make_env(height=20, width=20, max_steps=60):
     """Factory function to build single worker environment."""
     def _init():
         env = IslandCityEnv(height=height, width=width, max_steps=max_steps)
@@ -54,7 +54,7 @@ if __name__ == "__main__":
     print("Launching SINGLE environment (DummyVecEnv) for quick testing...")
     
     # 1. Single environment wrapped in DummyVecEnv
-    env = DummyVecEnv([make_env(height=10, width=10, max_steps=60)])
+    env = DummyVecEnv([make_env(height=20, width=20, max_steps=60)])
 
     # 2. Configure Custom CNN Policy kwargs
     policy_kwargs = dict(
@@ -70,7 +70,7 @@ if __name__ == "__main__":
         policy_kwargs=policy_kwargs,
         verbose=1,
         learning_rate=3e-4,
-        gamma=0.99,
+        gamma=0.999,
         ent_coef=0.01,
         batch_size=256,
         n_steps=256,
@@ -81,7 +81,7 @@ if __name__ == "__main__":
     model.learn(total_timesteps=1_000)
 
     # 5. Evaluate Trained Agent
-    eval_env = IslandCityEnv(height=10, width=10, max_steps=60)
+    eval_env = IslandCityEnv(height=20, width=20, max_steps=60)
     obs, info = eval_env.reset()
     terminated = False
     truncated = False

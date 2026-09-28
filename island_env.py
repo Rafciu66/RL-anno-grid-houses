@@ -81,6 +81,7 @@ class IslandCityEnv(gym.Env):
         self._place_building_tiles(y, x, btype)
         score_change = 0
         if btype == 0: # road
+            score_change -= 0.1
             min_dist_to_market = self.market_range*999
             for dy, dx in [(-1,0), (1,0), (0,-1), (0,1)]:
                 ny, nx = y + dy, x + dx
@@ -122,6 +123,7 @@ class IslandCityEnv(gym.Env):
         
         road_or_market = (self.building_grid == 1) | (self.building_grid == 3)
         road_mask = (self.building_grid == 1)
+        house_mask = (self.building_grid == 2)
         
         for btype in range(self.n_buildings):
             bh, bw = self.BUILDING_SIZES[btype]
@@ -143,15 +145,38 @@ class IslandCityEnv(gym.Env):
                         continue
                     
                     
-                    if btype == 0: # ROAD: must touch an existing road or market
-                        has_road_or_market = self._has_orthogonal_neighbor(road_or_market, x, y, bw, bh)
-                        if has_road_or_market:
-                            mask[idx] = True
+                    if btype == 0: # ROAD: must touch an existing road or market and be in range of market; must be shortest path to market
+                        market_y, market_x = self.H // 2 - 1, self.W // 2 - 1 # needs change for multiple markets
+                        is_shortest_path = False
+                        orthogonal_neighbors = self._get_orthogonal_neighbors(road_or_market, x, y, bw, bh)
+                        for nx, ny in orthogonal_neighbors:
+                            if self.building_grid[ny, nx] == 1 and self.dist_map[ny, nx] <  2*self.market_range and self.dist_map[ny, nx] + 1 <= abs(y - market_y) + abs(x - market_x) + 3:
+                                mask[idx] = True
+                                break
+                            elif self.building_grid[ny, nx] == 3:
+                                mask[idx] = True
+                                break
+                            
                             
                     elif btype == 1: # HOUSE: must touch at least one road
-                        has_road = self._has_orthogonal_neighbor(road_mask, x, y, bw, bh)
-                        if has_road:
-                            mask[idx] = True
+                        orthogonal_neighbors = self._get_orthogonal_neighbors(road_mask, x, y, bw, bh)
+                        if len(orthogonal_neighbors) > 0:
+                            will_be_deadend = False
+                            for nx, ny in orthogonal_neighbors:
+                                neighbors_of_neighbor = self._get_orthogonal_neighbors(house_mask, nx, ny, 1, 1)
+                                roads_of_neighbor = self._get_orthogonal_neighbors(road_mask, nx, ny, 1, 1)
+                                will_be_deadend = len(neighbors_of_neighbor) == 2
+                                if will_be_deadend:
+                                    break
+                                else:
+                                    total_x, total_y = 0, 0
+                                    for rx, ry in roads_of_neighbor:
+                                        total_x += rx - x # (x, y) = (+-1, +-1) means its L shaped crossroad which which must become 'T' or '+' Type
+                                        total_y += ry - y
+                                    if total_x != 0 and total_y != 0:
+                                        break # house cant be placed until L shape becomes + shape
+                            if not will_be_deadend:
+                                mask[idx] = True
                             
                     elif btype == 2: # MARKET: can be placed anywhere valid
                         pass
@@ -185,9 +210,10 @@ class IslandCityEnv(gym.Env):
         self.total_score = new_score
 
         mask = self.action_masks()
+        road_start_idx = 0
         house_start_idx = 1 * (self.H * self.W) # btype == 1
         house_end_idx = 2 * (self.H * self.W)
-        can_place_more_houses = np.any(mask[house_start_idx:house_end_idx])
+        can_place_more_houses = np.any(mask[road_start_idx:house_end_idx])
         terminated = not can_place_more_houses
         truncated = False
         
@@ -218,7 +244,7 @@ class IslandCityEnv(gym.Env):
             return True
 
         return False
-    def _get_orthogonal_neighbors(self, grid, x, y, bw, bh):
+    def _get_orthogonal_neighbors(self, grid, x, y, bw, bh) -> list:
         """Returns a list of (x, y) coordinates for all orthogonal neighbor cells that are True."""
         neighbors = []
 
@@ -258,8 +284,8 @@ class IslandCityEnv(gym.Env):
     def render(self):
         """Renders the current city layout to the terminal using ASCII/Emojis."""
         symbols = {
-            0: " . ",  # Empty Land
-            1: " ═ ",  # Road
+            0: " 🟩",  # Empty Land
+            1: " ⬛",  # Road
             2: " 🏠",  # House (2x2)
             3: " 🏢"   # Market (3x3)
         }
@@ -273,11 +299,13 @@ class IslandCityEnv(gym.Env):
             for x in range(self.W):
                 btype = self.building_grid[y, x]
                 if btype == 1:
-                    row_str += str(self.dist_map[y, x])
+                    s = str(int(self.dist_map[y, x]))
+                    row_str +=  s if len(s) >= 2 else str("0" + s)
                 elif btype == 2:
-                    row_str += str(self.instance_dict[self.instance_grid[y, x]])
+                    s = str(int(self.instance_dict[self.instance_grid[y, x]]))
+                    row_str +=  s if len(s) >= 2 else str("0" + s)
                 else:
-                    row_str += symbols.get(btype, " ? ")
+                    row_str += "##"
                 row_str += "|"
             print(row_str)
         for y in range(self.H):
