@@ -134,7 +134,7 @@ def make_env(height=10, width=10, max_steps=60):
 
 
 if __name__ == "__main__":
-    TIME_STEPS = 1_000
+    TIME_STEPS = 500_000
     start_time = time.perf_counter()
     # 1. Spawn parallel CPU environments
     num_cpu = max(1, multiprocessing.cpu_count() - 2)
@@ -157,9 +157,9 @@ if __name__ == "__main__":
         verbose=1,
         learning_rate=3e-4,
         gamma=0.999,
-        ent_coef=0.02,   # Encourages road exploration
+        ent_coef=0.1,   # Encourages road exploration
         batch_size=256,  # GPU minibatch size
-        n_steps=256,     # Worker rollout length
+        n_steps=1024,     # Worker rollout length
     )
 
     # 4. Train Agent

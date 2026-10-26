@@ -34,7 +34,7 @@ class IslandCityEnv(gym.Env):
         # Observation Space: (5, H, W)
         # Ch 0: Land Mask | Ch 1: Roads | Ch 2: Houses | Ch 3: Markets | Ch 4: Connectivity map
         self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=(4, self.H, self.W), dtype=np.float32
+            low=0.0, high=1.0, shape=(5, self.H, self.W), dtype=np.float32
         )
         
         self.reset()
@@ -68,14 +68,14 @@ class IslandCityEnv(gym.Env):
 
     def _get_obs(self):
         """Constructs the 5-channel observation tensor (5, H, W)."""
-        obs = np.zeros((4, self.H, self.W), dtype=np.float32)
+        obs = np.zeros((5, self.H, self.W), dtype=np.float32)
         obs[0] = self.land_mask
         obs[1] = (self.building_grid == 0).astype(np.float32)
         obs[2] = (self.building_grid == 1).astype(np.float32)
         obs[3] = (self.building_grid == 2).astype(np.float32)
         
         # Normalize distance channel to [0, 1] relative to max scoring range (15)
-        #obs[4] = self.dist_map
+        obs[4] = self.dist_map
         return obs
     def _building_agent(self, y, x, btype) -> float: # returns change in score
         self._place_building_tiles(y, x, btype)
@@ -150,34 +150,28 @@ class IslandCityEnv(gym.Env):
                         is_shortest_path = False
                         orthogonal_neighbors = self._get_orthogonal_neighbors(road_or_market, x, y, bw, bh)
                         for nx, ny in orthogonal_neighbors:
+                            far_x, far_y = 2*(nx - x) + x, y + 2*(ny - y)
+                            if 0 <= far_x < self.W and 0 <= far_y < self.H and self.building_grid[far_y, far_x] == 2:
+                                mask[idx] = False
+                                break
                             if self.building_grid[ny, nx] == 1 and self.dist_map[ny, nx] <  2*self.market_range and self.dist_map[ny, nx] + 1 <= abs(y - market_y) + abs(x - market_x) + 3:
                                 mask[idx] = True
-                                break
                             elif self.building_grid[ny, nx] == 3:
                                 mask[idx] = True
-                                break
                             
                             
                     elif btype == 1: # HOUSE: must touch at least one road
-                        orthogonal_neighbors = self._get_orthogonal_neighbors(road_mask, x, y, bw, bh)
-                        if len(orthogonal_neighbors) > 0:
+                        orthogonal_roads = self._get_orthogonal_neighbors(road_mask, x, y, bw, bh)
+                        if len(orthogonal_roads) > 0:
                             will_be_deadend = False
                             is_l_crossroad = False
-                            for nx, ny in orthogonal_neighbors:
-                                neighbors_of_neighbor = self._get_orthogonal_neighbors(house_mask, nx, ny, 1, 1)
-                                roads_of_neighbor = self._get_orthogonal_neighbors(road_mask, nx, ny, 1, 1)
-                                will_be_deadend = len(neighbors_of_neighbor) == 2
-                                if will_be_deadend:
+                            
+                            for nx, ny in orthogonal_roads:
+                                far_x, far_y = 2*(nx - x) + x, y + 2*(ny - y)
+                                if 0 <= far_x < self.W and 0 <= far_y < self.H and self.building_grid[far_y, far_x] in (1,3):
+                                    will_be_deadend = True
                                     break
-                                else:
-                                    total_x, total_y = 0, 0
-                                    for rx, ry in roads_of_neighbor:
-                                        total_x += rx - nx # (x, y) = (+-1, +-1) means its L shaped crossroad which which must become 'T' or '+' Type
-                                        total_y += ry - ny
-                                    is_l_crossroad = (total_x != 0 and total_y != 0)
-                                    if is_l_crossroad:
-                                        break # house cant be placed until L shape becomes + shape
-                            if not will_be_deadend and not is_l_crossroad:
+                            if not will_be_deadend:
                                 mask[idx] = True
                             
                     elif btype == 2: # MARKET: can be placed anywhere valid
@@ -186,7 +180,7 @@ class IslandCityEnv(gym.Env):
         return mask
     
     def _normalize_house_reward(self, distance) -> float:
-        return 1 - min(max(0, distance - self.market_range), self.market_range) / 8
+        return 1 - min(max(0, distance - self.market_range), self.market_range) / self.market_range
 
     def step(self, action):
         self.current_step += 1
