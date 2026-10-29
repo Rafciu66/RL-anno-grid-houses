@@ -70,7 +70,7 @@ def save_model(model):
     # Save the model
     model.save(next_filename)
 
-def print_to_txt(env, time_steps, time_elapsed, total_reward):
+def print_to_txt(env, time_steps, time_elapsed, total_reward, message = ""):
     output_dir = Path("outputs")
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -97,6 +97,7 @@ def print_to_txt(env, time_steps, time_elapsed, total_reward):
                 f"Total Time Steps: {time_steps}, Time Elapsed: {time_elapsed}, Total Reward: {total_reward}"
             )
             env.render()
+            print(message)
 def get_git_identifier() -> str:
     """Retrieve the current Git tag, or fallback to the short commit hash / 'default'."""
     try:
@@ -134,7 +135,7 @@ def make_env(height=10, width=10, max_steps=60):
 
 
 if __name__ == "__main__":
-    TIME_STEPS = 500_000
+    TIME_STEPS = 50_000
     start_time = time.perf_counter()
     # 1. Spawn parallel CPU environments
     num_cpu = max(1, multiprocessing.cpu_count() - 2)
@@ -182,6 +183,7 @@ if __name__ == "__main__":
         obs, reward, terminated, truncated, info = eval_env.step(action)
         total_reward += reward
     end_time = time.perf_counter()
-    print_to_txt(eval_env, TIME_STEPS, end_time - start_time, total_reward)
+    changes = "road cost 0.1 -> 0, obs[4] (distances) now only have values for tiles with roads"
+    print_to_txt(eval_env, TIME_STEPS, end_time - start_time, total_reward, message=changes)
     
     print(f"\nFinal Episode Score: {eval_env.total_score:.2f} points (Total Reward: {total_reward:.2f})")

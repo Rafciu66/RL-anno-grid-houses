@@ -18,7 +18,7 @@ class IslandCityEnv(gym.Env):
         self.H = height
         self.W = width
         self.max_steps = max_steps
-        self.market_range = 8
+        self.market_range = 4
         
         # Footprint sizes: (height, width)
         self.BUILDING_SIZES = {
@@ -53,7 +53,6 @@ class IslandCityEnv(gym.Env):
         # Unique IDs map to track multi-tile house/market instances
         self.instance_grid = np.zeros((self.H, self.W), dtype=np.int32)
         self.next_instance_id = 1
-        #temporary only for houses and relevan distances to markets
         self.instance_dict = {}
         # Road and house distance map 
         self.dist_map = np.full((self.H, self.W), 99.9, dtype=np.float32)
@@ -74,21 +73,22 @@ class IslandCityEnv(gym.Env):
         obs[2] = (self.building_grid == 1).astype(np.float32)
         obs[3] = (self.building_grid == 2).astype(np.float32)
         
-        # Normalize distance channel to [0, 1] relative to max scoring range (15)
-        obs[4] = self.dist_map
+        # Normalize distance channel to [0, 1] relative to max scoring range (self.market_range)
+        road_only_dist_map = np.where(self.building_grid == 1, self.dist_map, 0.0)
+        obs[4] = self._normalize_house_reward(road_only_dist_map) # pass distance map filtered down to road tiles only
         return obs
     def _building_agent(self, y, x, btype) -> float: # returns change in score
         self._place_building_tiles(y, x, btype)
         score_change = 0
         if btype == 0: # road
-            score_change -= 0.1
+            score_change -= 0
             min_dist_to_market = self.market_range*999
             for dy, dx in [(-1,0), (1,0), (0,-1), (0,1)]:
                 ny, nx = y + dy, x + dx
                 if 0 <= ny < self.H and 0 <= nx < self.W:
                     if self.building_grid[ny, nx] == 1: #is next to other road:
                         min_dist_to_market = min(min_dist_to_market, self.dist_map[ny, nx] + 1)
-                    elif self.building_grid[ny, nx] == 3:
+                    elif self.building_grid[ny, nx] == 3: #is next to market
                         min_dist_to_market = 0
             self.dist_map[y, x] = min_dist_to_market
             queue = deque()
@@ -179,8 +179,12 @@ class IslandCityEnv(gym.Env):
                         #mask[idx] = True     
         return mask
     
-    def _normalize_house_reward(self, distance) -> float:
-        return 1 - min(max(0, distance - self.market_range), self.market_range) / self.market_range
+    def _normalize_house_reward(self, distance, fields = None):
+      # Restrict (distance - market_range) to values between 0 and market_range
+      clipped_dist = np.clip(
+          distance - self.market_range, 0, self.market_range
+      )
+      return 1.0 - (clipped_dist / self.market_range)
 
     def step(self, action):
         self.current_step += 1
