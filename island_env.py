@@ -27,7 +27,7 @@ class IslandCityEnv(gym.Env):
             2: (1, 1)  # Market 
         }
         
-        # Action Space: 4 buildings * H * W
+        # Action Space: 3 buildings * H * W
         self.n_buildings = 3
         self.action_space = spaces.Discrete(self.n_buildings * self.H * self.W)
         
@@ -57,10 +57,14 @@ class IslandCityEnv(gym.Env):
         # Road and house distance map 
         self.dist_map = np.full((self.H, self.W), 99.9, dtype=np.float32)
 
+        self.action_mask = np.zeros(self.action_space.n, dtype=bool)
+        # action mask for roads only
+        self.exlusive_road_builds = set() # only for tiles adjacent to market
+        self.allowed_buidling_builds = set()
+
         # SEEDED START: Pre-place 1 Market and 1 adjacent Road in the center
         mid_y, mid_x = self.H // 2 - 1, self.W // 2 - 1
         self._building_agent(mid_y, mid_x, 2) # Market (1x1)
-        self._building_agent(mid_y + 1, mid_x, 0) # Road (1x1)
         
         #self._update_distances_and_score() 
         return self._get_obs(), {"action_mask": self.action_masks()}
@@ -90,6 +94,8 @@ class IslandCityEnv(gym.Env):
                         min_dist_to_market = min(min_dist_to_market, self.dist_map[ny, nx] + 1)
                     elif self.building_grid[ny, nx] == 3: #is next to market
                         min_dist_to_market = 0
+                    elif self.building_grid[ny, nx] == 0: #possible next or building
+                        self.allowed_buidling_builds.add((ny,nx))
             self.dist_map[y, x] = min_dist_to_market
             queue = deque()
             queue.append((y, x))
@@ -108,77 +114,89 @@ class IslandCityEnv(gym.Env):
                             score_change += self._normalize_house_reward(dist) - self._normalize_house_reward(self.instance_dict[self.instance_grid[ny, nx]])
                             self.instance_dict[self.instance_grid[ny, nx]] = dist
 
-        elif btype == 1:
+        elif btype == 1: #house
             bh, bw = self.BUILDING_SIZES[btype]
-            neighbors = self._get_orthogonal_neighbors((self.building_grid == 1),x,y,bw,bh)
+            neighbors = self._get_orthogonal_neighbors((self.building_grid == 1),y,x,bw,bh)
             min_dist_to_market = self.market_range*999
             for nx, ny in neighbors:
                 if self.building_grid[ny, nx] == 1:
                     min_dist_to_market = min(min_dist_to_market, self.dist_map[ny, nx])
             self.instance_dict[self.next_instance_id - 1] = min_dist_to_market
             score_change += self._normalize_house_reward(min_dist_to_market)
+        elif btype == 2: # market
+            bh, bw = self.BUILDING_SIZES[btype]
+            empty_neighbours = self._get_orthogonal_neighbors(self.building_grid == 0, y, x, bw, bh)
+            for nx, ny in empty_neighbours:
+                self.exlusive_road_builds.add((ny,nx))
         return score_change
+    
     def action_masks(self) -> np.ndarray:
-        mask = np.zeros(self.action_space.n, dtype=bool)
-        
+        self._update_action_mask()
+        return self._get_action_mask()
+    
+    def _get_action_mask(self):
+        return self.action_mask
+    def _update_action_mask(self):
+        mask = self._get_action_mask()
+        mask.fill(False)
         road_or_market = (self.building_grid == 1) | (self.building_grid == 3)
         road_mask = (self.building_grid == 1)
         house_mask = (self.building_grid == 2)
         
         for btype in range(self.n_buildings):
             bh, bw = self.BUILDING_SIZES[btype]
-            for y in range(self.H):
-                for x in range(self.W):
-                    idx = btype * (self.H * self.W) + y * self.W + x
+            yx_indexes = self.allowed_buidling_builds if btype != 0 else self.allowed_buidling_builds | self.exlusive_road_builds
+            for y, x in yx_indexes:
+            
+                idx = btype * (self.H * self.W) + y * self.W + x
+                
+                # 1. Boundary & Land check
+                if y + bh > self.H or x + bw > self.W:
+                    continue
+                if not np.all(self.land_mask[y:y+bh, x:x+bw] == 1):
+                    continue
                     
-                    # 1. Boundary & Land check
-                    if y + bh > self.H or x + bw > self.W:
-                        continue
-                    if not np.all(self.land_mask[y:y+bh, x:x+bw] == 1):
-                        continue
+                footprint = self.building_grid[y:y+bh, x:x+bw]
+                
+                
+                # Must be completely empty land to build
+                if not np.all(footprint == 0):
+                    continue
+                
+                
+                if btype == 0: # ROAD: must touch an existing road or market and be in range of market; must be shortest path to market
+                    market_y, market_x = self.H // 2 - 1, self.W // 2 - 1 # needs change for multiple markets
+                    is_shortest_path = False
+                    orthogonal_neighbors = self._get_orthogonal_neighbors(road_or_market, y, x, bw, bh)
+                    for nx, ny in orthogonal_neighbors:
+                        far_x, far_y = 2*(nx - x) + x, y + 2*(ny - y) #prevention from creating ending roads, if there is house on the other side of the road there can only be building on this side
+                        if 0 <= far_x < self.W and 0 <= far_y < self.H and self.building_grid[far_y, far_x] == 2:
+                            mask[idx] = False
+                            break
+                        if self.dist_map[ny, nx] <  2*self.market_range and self.dist_map[ny, nx] + 1 <= abs(y - market_y) + abs(x - market_x) + 3:
+                            mask[idx] = True
+                        elif self.building_grid[ny, nx] == 3:
+                            mask[idx] = True
                         
-                    footprint = self.building_grid[y:y+bh, x:x+bw]
-                    
-                    
-                    # Must be completely empty land to build
-                    if not np.all(footprint == 0):
-                        continue
-                    
-                    
-                    if btype == 0: # ROAD: must touch an existing road or market and be in range of market; must be shortest path to market
-                        market_y, market_x = self.H // 2 - 1, self.W // 2 - 1 # needs change for multiple markets
-                        is_shortest_path = False
-                        orthogonal_neighbors = self._get_orthogonal_neighbors(road_or_market, x, y, bw, bh)
-                        for nx, ny in orthogonal_neighbors:
+                        
+                elif btype == 1: # HOUSE: must touch at least one road
+                    orthogonal_roads = self._get_orthogonal_neighbors(road_mask, y, x, bw, bh)
+                    if len(orthogonal_roads) > 0:
+                        will_be_deadend = False
+                        is_l_crossroad = False
+                        
+                        for nx, ny in orthogonal_roads:
                             far_x, far_y = 2*(nx - x) + x, y + 2*(ny - y)
-                            if 0 <= far_x < self.W and 0 <= far_y < self.H and self.building_grid[far_y, far_x] == 2:
-                                mask[idx] = False
+                            if 0 <= far_x < self.W and 0 <= far_y < self.H and self.building_grid[far_y, far_x] == 1:
+                                will_be_deadend = True
                                 break
-                            if self.building_grid[ny, nx] == 1 and self.dist_map[ny, nx] <  2*self.market_range and self.dist_map[ny, nx] + 1 <= abs(y - market_y) + abs(x - market_x) + 3:
-                                mask[idx] = True
-                            elif self.building_grid[ny, nx] == 3:
-                                mask[idx] = True
-                            
-                            
-                    elif btype == 1: # HOUSE: must touch at least one road
-                        orthogonal_roads = self._get_orthogonal_neighbors(road_mask, x, y, bw, bh)
-                        if len(orthogonal_roads) > 0:
-                            will_be_deadend = False
-                            is_l_crossroad = False
-                            
-                            for nx, ny in orthogonal_roads:
-                                far_x, far_y = 2*(nx - x) + x, y + 2*(ny - y)
-                                if 0 <= far_x < self.W and 0 <= far_y < self.H and self.building_grid[far_y, far_x] in (1,3):
-                                    will_be_deadend = True
-                                    break
-                            if not will_be_deadend:
-                                mask[idx] = True
-                            
-                    elif btype == 2: # MARKET: can be placed anywhere valid
-                        pass
-                        #mask[idx] = True     
-        return mask
-    
+                        if not will_be_deadend:
+                            mask[idx] = True
+                        
+                elif btype == 2: # MARKET: can be placed anywhere valid
+                    pass
+                    #mask[idx] = True
+
     def _normalize_house_reward(self, distance, fields = None):
       # Restrict (distance - market_range) to values between 0 and market_range
       clipped_dist = np.clip(
@@ -210,11 +228,7 @@ class IslandCityEnv(gym.Env):
         self.total_score = new_score
 
         mask = self.action_masks()
-        road_start_idx = 0
-        house_start_idx = 1 * (self.H * self.W) # btype == 1
-        house_end_idx = 2 * (self.H * self.W)
-        can_place_more_houses = np.any(mask[road_start_idx:house_end_idx])
-        terminated = not can_place_more_houses
+        terminated = not np.any(mask)
         truncated = False
         
         return self._get_obs(), reward, terminated, truncated, {"action_mask": mask}
@@ -222,63 +236,66 @@ class IslandCityEnv(gym.Env):
     def _place_building_tiles(self, y, x, btype):
         bh, bw = self.BUILDING_SIZES[btype]
         # Convert action building ID -> grid building ID
-        grid_id = btype + 1
-
+        grid_id = btype + 1 
+        for in_y in range(y, y + bh): #iterate thorugh tiles building will occupy
+            for in_x in range(x, x+bw):
+                self.exlusive_road_builds.discard((in_y, in_x))
+                self.allowed_buidling_builds.discard((in_y, in_x))
         self.building_grid[y:y+bh, x:x+bw] = grid_id
         if btype in (1, 2):
             self.instance_grid[y:y+bh, x:x+bw] = self.next_instance_id
             self.next_instance_id += 1
-    def _has_orthogonal_neighbor(self, grid, x, y, bw, bh):
-        """Checks if any orthogonal neighbor cell is True, short-circuiting on the first hit."""
+    def _has_orthogonal_neighbor(self, grid, y, x, bw, bh):
+        """Checks if anx orthogonal neighbor cell is True, short-circuiting on the first hit."""
         # Top edge
-        if y > 0 and np.any(grid[y - 1, x : min(self.W, x + bw)]):
+        if x > 0 and np.anx(grid[x - 1, y : min(self.W, y + bw)]):
             return True
         # Bottom edge
-        if y + bh < self.H and np.any(grid[y + bh, x : min(self.W, x + bw)]):
+        if x + bh < self.H and np.anx(grid[x + bh, y : min(self.W, y + bw)]):
             return True
         # Left edge
-        if x > 0 and np.any(grid[y : min(self.H, y + bh), x - 1]):
+        if y > 0 and np.anx(grid[x : min(self.H, x + bh), y - 1]):
             return True
         # Right edge
-        if x + bw < self.W and np.any(grid[y : min(self.H, y + bh), x + bw]):
+        if y + bw < self.W and np.anx(grid[x : min(self.H, x + bh), y + bw]):
             return True
 
         return False
-    def _get_orthogonal_neighbors(self, grid, x, y, bw, bh) -> list:
-        """Returns a list of (x, y) coordinates for all orthogonal neighbor cells that are True."""
+    def _get_orthogonal_neighbors(self, grid, y, x, bw, bh) -> list:
+        """Returns a list of (y, x) coordinates for all orthogonal neighbor cells that are True."""
         neighbors = []
 
         # Top edge
-        if y > 0:
-            x_end = min(self.W, x + bw)
-            row = grid[y - 1, x:x_end]
+        if x > 0:
+            y_end = min(self.W, y + bw)
+            row = grid[x - 1, y:y_end]
             for offset, val in enumerate(row):
                 if val:
-                    neighbors.append((x + offset, y - 1))
+                    neighbors.append((y + offset, x - 1))
 
         # Bottom edge
-        if y + bh < self.H:
-            x_end = min(self.W, x + bw)
-            row = grid[y + bh, x:x_end]
+        if x + bh < self.H:
+            y_end = min(self.W, y + bw)
+            row = grid[x + bh, y:y_end]
             for offset, val in enumerate(row):
                 if val:
-                    neighbors.append((x + offset, y + bh))
+                    neighbors.append((y + offset, x + bh))
 
         # Left edge
-        if x > 0:
-            y_end = min(self.H, y + bh)
-            col = grid[y:y_end, x - 1]
+        if y > 0:
+            x_end = min(self.H, x + bh)
+            col = grid[x:x_end, y - 1]
             for offset, val in enumerate(col):
                 if val:
-                    neighbors.append((x - 1, y + offset))
+                    neighbors.append((y - 1, x + offset))
 
         # Right edge
-        if x + bw < self.W:
-            y_end = min(self.H, y + bh)
-            col = grid[y:y_end, x + bw]
+        if y + bw < self.W:
+            x_end = min(self.H, x + bh)
+            col = grid[x:x_end, y + bw]
             for offset, val in enumerate(col):
                 if val:
-                    neighbors.append((x + bw, y + offset))
+                    neighbors.append((y + bw, x + offset))
 
         return neighbors
     def render(self):

@@ -43,11 +43,12 @@ def run_visualization(animate=False):
 
     obs, info = env.reset()
     terminated = False
+    truncated = False
     step_count = 0
 
     print("Running evaluation episode...")
 
-    while not terminated:
+    while not (terminated or truncated):
         step_count += 1
         action_masks = get_action_masks(env)
         

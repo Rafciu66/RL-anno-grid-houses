@@ -12,8 +12,8 @@ import re
 from contextlib import redirect_stdout
 from pathlib import Path
 
-GRID_HEIGHT = 20
-GRID_WIDTH = 20
+GRID_HEIGHT = 10
+GRID_WIDTH = 10
 class CustomGridCNN(BaseFeaturesExtractor):
     """Custom 2D CNN Feature Extractor tailored for 10x10 grid boards."""
     def __init__(self, observation_space, features_dim=128):
@@ -135,7 +135,7 @@ def make_env(height=10, width=10, max_steps=60):
 
 
 if __name__ == "__main__":
-    TIME_STEPS = 50_000
+    TIME_STEPS = 10_000
     start_time = time.perf_counter()
     # 1. Spawn parallel CPU environments
     num_cpu = max(1, multiprocessing.cpu_count() - 2)
@@ -174,14 +174,16 @@ if __name__ == "__main__":
     eval_env = IslandCityEnv(height=GRID_HEIGHT, width=GRID_WIDTH, max_steps=60)
     obs, info = eval_env.reset()
     terminated = False
+    truncated = False
     total_reward = 0
     
     print("\n--- Running Evaluation Episode ---")
-    while not terminated:
+    while not (terminated or truncated):
         action_masks = eval_env.action_masks()
         action, _states = model.predict(obs, action_masks=action_masks, deterministic=True)
         obs, reward, terminated, truncated, info = eval_env.step(action)
         total_reward += reward
+        print("aa")
     end_time = time.perf_counter()
     changes = "road cost 0.1 -> 0, obs[4] (distances) now only have values for tiles with roads"
     print_to_txt(eval_env, TIME_STEPS, end_time - start_time, total_reward, message=changes)
