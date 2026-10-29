@@ -174,16 +174,14 @@ if __name__ == "__main__":
     eval_env = IslandCityEnv(height=GRID_HEIGHT, width=GRID_WIDTH, max_steps=60)
     obs, info = eval_env.reset()
     terminated = False
-    truncated = False
     total_reward = 0
     
     print("\n--- Running Evaluation Episode ---")
-    while not (terminated or truncated):
+    while not terminated:
         action_masks = eval_env.action_masks()
         action, _states = model.predict(obs, action_masks=action_masks, deterministic=True)
         obs, reward, terminated, truncated, info = eval_env.step(action)
         total_reward += reward
-        print("aa")
     end_time = time.perf_counter()
     changes = "road cost 0.1 -> 0, obs[4] (distances) now only have values for tiles with roads"
     print_to_txt(eval_env, TIME_STEPS, end_time - start_time, total_reward, message=changes)

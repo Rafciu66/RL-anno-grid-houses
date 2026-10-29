@@ -61,6 +61,7 @@ class IslandCityEnv(gym.Env):
         # action mask for roads only
         self.exlusive_road_builds = set() # only for tiles adjacent to market
         self.allowed_buidling_builds = set()
+        self.disallowed_building_build = set()
 
         # SEEDED START: Pre-place 1 Market and 1 adjacent Road in the center
         mid_y, mid_x = self.H // 2 - 1, self.W // 2 - 1
@@ -94,7 +95,7 @@ class IslandCityEnv(gym.Env):
                         min_dist_to_market = min(min_dist_to_market, self.dist_map[ny, nx] + 1)
                     elif self.building_grid[ny, nx] == 3: #is next to market
                         min_dist_to_market = 0
-                    elif self.building_grid[ny, nx] == 0: #possible next or building
+                    elif self.building_grid[ny, nx] == 0: #possible next road or building
                         self.allowed_buidling_builds.add((ny,nx))
             self.dist_map[y, x] = min_dist_to_market
             queue = deque()
@@ -138,12 +139,11 @@ class IslandCityEnv(gym.Env):
         return self.action_mask
     def _update_action_mask(self):
         mask = self._get_action_mask()
-        mask.fill(False)
         road_or_market = (self.building_grid == 1) | (self.building_grid == 3)
         road_mask = (self.building_grid == 1)
         house_mask = (self.building_grid == 2)
         
-        for btype in range(self.n_buildings):
+        for btype in range(self.n_buildings): # new builds
             bh, bw = self.BUILDING_SIZES[btype]
             yx_indexes = self.allowed_buidling_builds if btype != 0 else self.allowed_buidling_builds | self.exlusive_road_builds
             for y, x in yx_indexes:
@@ -197,6 +197,11 @@ class IslandCityEnv(gym.Env):
                     pass
                     #mask[idx] = True
 
+
+        for btype in range(self.n_buildings):
+            for y, x in self.disallowed_building_build:
+                idx = btype * (self.H * self.W) + y * self.W + x
+                mask[idx] = False
     def _normalize_house_reward(self, distance, fields = None):
       # Restrict (distance - market_range) to values between 0 and market_range
       clipped_dist = np.clip(
@@ -239,8 +244,9 @@ class IslandCityEnv(gym.Env):
         grid_id = btype + 1 
         for in_y in range(y, y + bh): #iterate thorugh tiles building will occupy
             for in_x in range(x, x+bw):
-                self.exlusive_road_builds.discard((in_y, in_x))
-                self.allowed_buidling_builds.discard((in_y, in_x))
+                self.disallowed_building_build.add((in_y, in_x))
+                # self.exlusive_road_builds.discard((in_y, in_x))
+                # self.allowed_buidling_builds.discard((in_y, in_x))
         self.building_grid[y:y+bh, x:x+bw] = grid_id
         if btype in (1, 2):
             self.instance_grid[y:y+bh, x:x+bw] = self.next_instance_id
