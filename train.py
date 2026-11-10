@@ -4,16 +4,16 @@ import torch
 import torch.nn as nn
 import gymnasium as gym
 import time
+import re
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from sb3_contrib import MaskablePPO
 from island_env import IslandCityEnv
-import re
 from contextlib import redirect_stdout
 from pathlib import Path
-
-GRID_HEIGHT = 30
-GRID_WIDTH = 30
+import random
+GRID_HEIGHT = 10
+GRID_WIDTH = 10
 class CustomGridCNN(BaseFeaturesExtractor):
     """Custom 2D CNN Feature Extractor tailored for 10x10 grid boards."""
     def __init__(self, observation_space, features_dim=128):
@@ -126,22 +126,22 @@ def get_git_identifier() -> str:
 
     # Sanitize for valid file paths
     return identifier.replace("/", "_")
-def make_env(height=10, width=10, max_steps=60):
+def make_env(height=10, width=10, max_steps=60, start_seed = 0):
     """Factory function to build worker environments."""
     def _init():
-        env = IslandCityEnv(height=height, width=width, max_steps=max_steps)
+        env = IslandCityEnv(height=height, width=width, max_steps=max_steps, start_seed=start_seed)
         return MaskWrapper(env)
     return _init
 
 
 if __name__ == "__main__":
-    TIME_STEPS = 2000_000
+    TIME_STEPS = 1000_000
     start_time = time.perf_counter()
     # 1. Spawn parallel CPU environments
     num_cpu = max(1, multiprocessing.cpu_count() - 2)
     print(f"Launching {num_cpu} parallel CPU environments...")
     
-    env = SubprocVecEnv([make_env(height=GRID_HEIGHT, width=GRID_WIDTH, max_steps=60) for _ in range(num_cpu)])
+    env = SubprocVecEnv([make_env(height=GRID_HEIGHT, width=GRID_WIDTH, max_steps=60, start_seed=5) for _ in range(num_cpu)])
 
     # 2. Configure Custom CNN Policy kwargs
     policy_kwargs = dict(
@@ -183,7 +183,7 @@ if __name__ == "__main__":
         obs, reward, terminated, truncated, info = eval_env.step(action)
         total_reward += reward
     end_time = time.perf_counter()
-    changes = "Fixed bugs, inconsistent index order in _get_orthogonal_neighbors"
+    changes = "road_reward: 0 -> 0, market: 0 -> 0, initial house reward: 0 -> 0"
     print_to_txt(eval_env, TIME_STEPS, end_time - start_time, total_reward, message=changes)
     
     print(f"\nFinal Episode Score: {eval_env.total_score:.2f} points (Total Reward: {total_reward:.2f})")
