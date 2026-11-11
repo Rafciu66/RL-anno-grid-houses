@@ -20,7 +20,14 @@ class IslandCityEnv(gym.Env):
         self.max_steps = max_steps
         self.market_range = 2
         self.start_seed = start_seed
-
+        self.base_score_change = 0
+        self.buliding_scores = {
+            0: 0,
+            1: 0,
+            2: -0.25
+        }
+        self.house_adj_bonus_add = 0.25
+        self.house_adj_bonus_mult = 1.5
         # Footprint sizes: (height, width)
         self.BUILDING_SIZES = {
             0: (1, 1), # Road 
@@ -47,8 +54,8 @@ class IslandCityEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.current_step = 0
-        self.total_score = 0.0
-        
+        self.total_model_score = 0.0
+        self.total_game_score = 0.0
         # 1 = Land, 0 = Water
         self.land_mask = np.ones((self.H, self.W), dtype=np.float32)
         
@@ -127,11 +134,11 @@ class IslandCityEnv(gym.Env):
         self._place_tiles_on_grid(y, x, btype)
         handler = self.buidling_handlers.get(btype)
         if handler:
-            score_change = handler(y, x)
+            model_score_change = handler(y, x)
         else:
-            score_change = 0
+            model_score_change = 0
         self._update_action_mask()
-        return score_change
+        return model_score_change
     
     def action_masks(self) -> np.ndarray:
         self._update_action_mask()
@@ -169,7 +176,7 @@ class IslandCityEnv(gym.Env):
         # self.updated_tiles.clear()
         for btype in range(self.n_buildings): # new builds
             bh, bw = self.BUILDING_SIZES[btype]
-            yx_indexes = self.allowed_buidling_builds if btype != 0 else self.allowed_buidling_builds | self.extra_road_spots
+            yx_indexes = self.allowed_buidling_builds #if btype != 0 else self.allowed_buidling_builds | self.extra_road_spots
             if btype != 0:
                 self._remove_extremes_from_set(yx_indexes)
             for y, x in yx_indexes:
@@ -254,14 +261,14 @@ class IslandCityEnv(gym.Env):
         reward = self._building_agent(y, x, btype)
             
         # Re-evaluate pathfinding & score
-        old_score = self.total_score
+        old_model_score = self.total_model_score
         #new_score = self._update_distances_and_score()
         
         # Delta reward calculation (-0.01 step penalty to discourage endless loops)
         #reward = (new_score - old_score) - 0.01
         #reward = (new_score - old_score)
-        new_score = old_score + reward
-        self.total_score = new_score
+        new_model_score = old_model_score + reward
+        self.total_model_score = new_model_score
 
         mask = self.action_masks()
         terminated = not np.any(mask)
@@ -340,7 +347,7 @@ class IslandCityEnv(gym.Env):
             3: " 🏢"   # Market (3x3)
         }
         
-        print(f"\n--- Step: {self.current_step}/{self.max_steps} | Score: {self.total_score:.2f} ---")
+        print(f"\n--- Step: {self.current_step}/{self.max_steps} | Model score: {self.total_model_score:.2f}  | Game score: {self.total_game_score}---")
         #RED = "\033[31m"
         #GREEN = "\033[32m"
         #RESET = "\033[0m"
@@ -385,7 +392,7 @@ class IslandCityEnv(gym.Env):
                 self._building_agent(y, self.W // 2, 0)
             self._building_agent(mid_y, mid_x, 0) # Market (1x1)
 
-    def _update_distances_and_score(self) -> float:
+    def _update_distances_and_score(self) -> float:# not used
         """BFS Pathfinding over roads to compute house score decay."""
         self.dist_map.fill(99.0)
         
@@ -509,23 +516,28 @@ class IslandCityEnv(gym.Env):
                         self.instance_dict[self.instance_grid[ny, nx]] = dist
         return score_change
     def _handle_house(self, y, x) -> float:
-        score_change = 0
+        model_score_change = self.base_score_change + self.buliding_scores[1]
         bh, bw = self.BUILDING_SIZES[1]
-        neighbors = self._get_orthogonal_neighbors((self.building_grid == 1),y,x,bw,bh)
+        neighbors = self._get_orthogonal_neighbors((self.building_grid),y,x,bw,bh)
         min_dist_to_market = self.market_range*999
+        multiplicate = 1
         for ny, nx in neighbors:
             if self.building_grid[ny, nx] == 1:
                 min_dist_to_market = min(min_dist_to_market, self.dist_map[ny, nx])
+            elif self.building_grid[ny, nx] == 2:
+                model_score_change+=self.house_adj_bonus_add
+                multiplicate*=self.house_adj_bonus_mult
         self.instance_dict[self.next_instance_id - 1] = min_dist_to_market
-        score_change += self._normalize_house_reward(min_dist_to_market)
+        model_score_change += self._normalize_house_reward(min_dist_to_market) * multiplicate
+        self.total_game_score += self._normalize_house_reward(min_dist_to_market)
         # for ny, nx in ((-2,0), (-1,0), (1,0), (2,0), (0,-2), (0,-1), (0,1), (0,2)):
         #     ty, tx = y + ny, x + nx
         #     if 0 <= ty < self.H and 0 <= tx < self.W:
         #         self.updated_tiles.add((ty, tx))
         # self._update_action_mask()
-        return score_change      
+        return model_score_change      
     def _handle_road(self, y, x) -> float:
-        score_change = 0
+        model_score_change = self.base_score_change + self.buliding_scores[0]
         min_dist_to_market = self.market_range*999
         for dy, dx in [(-1,0), (1,0), (0,-1), (0,1)]:
             ny, nx = y + dy, x + dx
@@ -539,16 +551,18 @@ class IslandCityEnv(gym.Env):
                     self.allowed_buidling_builds.add((ny,nx))
         self.dist_map[y, x] = min_dist_to_market
         # BFS over roads that have new shortest connection to market
-        score_change += self._update_road_distances(y, x)
+        score_change = self._update_road_distances(y, x)
+        model_score_change+= score_change
+        self.total_game_score+= score_change
         # for ny, nx in ((-2,0), (-1,0), (1,0), (2,0), (0,-2), (0,-1), (0,1), (0,2)):
         #     ty, tx = y + ny, x + nx
         #     if 0 <= ty < self.H and 0 <= tx < self.W:
         #         self.updated_tiles.add((ty, tx))
         # self._update_action_mask()
         # 1. North: Smallest Y (Furthest up)
-        return score_change
+        return model_score_change
     def _handle_market(self, y, x) -> float:
-        score_change = 0
+        model_score_change = self.base_score_change + self.buliding_scores[2]
         bh, bw = self.BUILDING_SIZES[2]
         empty_neighbours = self._get_orthogonal_neighbors(self.building_grid == 0, y, x, bw, bh)
         road_neighbours = self._get_orthogonal_neighbors(self.building_grid == 1, y, x, bw, bh)
@@ -556,5 +570,7 @@ class IslandCityEnv(gym.Env):
             self.extra_road_spots.add((ny,nx))
         for ny, nx in road_neighbours:
             self.dist_map[ny, nx] = 0
-            score_change += self._update_road_distances(ny, nx)
-        return score_change
+            score_change = self._update_road_distances(ny, nx)
+            model_score_change += score_change
+            self.total_game_score += score_change
+        return model_score_change

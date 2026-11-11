@@ -183,7 +183,9 @@ if __name__ == "__main__":
         obs, reward, terminated, truncated, info = eval_env.step(action)
         total_reward += reward
     end_time = time.perf_counter()
-    changes = "road_reward: 0 -> 0, market: 0 -> 0, initial house reward: 0 -> 0"
+    scores = eval_env.buliding_scores
+    base_score = eval_env.base_score_change
+    changes = f"base_score: {base_score} road_score: {scores[0]}, market: {scores[2]}, initial house reward: {scores[1]}, \n road cannot be placed just next to market(there must be road adjacent), {eval_env.house_adj_bonus_add} from every adjcent house when placing house, multiplied by {eval_env.house_adj_bonus_mult} for every adjcent house"
     print_to_txt(eval_env, TIME_STEPS, end_time - start_time, total_reward, message=changes)
     
     print(f"\nFinal Episode Score: {eval_env.total_score:.2f} points (Total Reward: {total_reward:.2f})")
