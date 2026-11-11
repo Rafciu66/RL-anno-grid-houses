@@ -135,7 +135,7 @@ def make_env(height=10, width=10, max_steps=60, start_seed = 0):
 
 
 if __name__ == "__main__":
-    TIME_STEPS = 1000_000
+    TIME_STEPS = 100_000
     start_time = time.perf_counter()
     # 1. Spawn parallel CPU environments
     num_cpu = max(1, multiprocessing.cpu_count() - 2)
@@ -188,4 +188,4 @@ if __name__ == "__main__":
     changes = f"base_score: {base_score} road_score: {scores[0]}, market: {scores[2]}, initial house reward: {scores[1]}, \n road cannot be placed just next to market(there must be road adjacent), {eval_env.house_adj_bonus_add} from every adjcent house when placing house, multiplied by {eval_env.house_adj_bonus_mult} for every adjcent house"
     print_to_txt(eval_env, TIME_STEPS, end_time - start_time, total_reward, message=changes)
     
-    print(f"\nFinal Episode Score: {eval_env.total_score:.2f} points (Total Reward: {total_reward:.2f})")
+    print(f"\nFinal Episode Model Score: {eval_env.total_model_score:.2f}, Game Score: {eval_env.total_game_score} points (Total Reward: {total_reward:.2f})")
