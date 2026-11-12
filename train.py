@@ -135,7 +135,7 @@ def make_env(height=10, width=10, max_steps=60, start_seed = 0):
 
 
 if __name__ == "__main__":
-    TIME_STEPS = 100_000
+    TIME_STEPS = 10_000
     start_time = time.perf_counter()
     # 1. Spawn parallel CPU environments
     num_cpu = max(1, multiprocessing.cpu_count() - 2)
@@ -183,9 +183,9 @@ if __name__ == "__main__":
         obs, reward, terminated, truncated, info = eval_env.step(action)
         total_reward += reward
     end_time = time.perf_counter()
-    scores = eval_env.buliding_scores
+    scores = eval_env.BULIDING_SCORES
     base_score = eval_env.base_score_change
-    changes = f"base_score: {base_score} road_score: {scores[0]}, market: {scores[2]}, initial house reward: {scores[1]}, \n road cannot be placed just next to market(there must be road adjacent), {eval_env.house_adj_bonus_add} from every adjcent house when placing house, multiplied by {eval_env.house_adj_bonus_mult} for every adjcent house"
+    changes = f"base_score: {base_score} road_score: {scores["road"]}, market: {scores["market"]}, initial house reward: {scores["house"]}, \n road cannot be placed just next to market(there must be road adjacent), {eval_env.house_adj_bonus_add} from every adjcent house when placing house, multiplied by {eval_env.house_adj_bonus_mult} for every adjcent house"
     print_to_txt(eval_env, TIME_STEPS, end_time - start_time, total_reward, message=changes)
     
     print(f"\nFinal Episode Model Score: {eval_env.total_model_score:.2f}, Game Score: {eval_env.total_game_score} points (Total Reward: {total_reward:.2f})")
