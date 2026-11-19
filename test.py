@@ -73,7 +73,7 @@ if __name__ == "__main__":
         exit(1)
 
     # Initialize Environment
-    env = IslandCityEnv(height=GRID_HEIGHT, width=GRID_WIDTH, max_steps=60, start_seed=5)
+    env = IslandCityEnv(height=GRID_HEIGHT, width=GRID_WIDTH, max_steps=60, start_seed=0)
 
     # Pass custom policy kwargs so SB3 can reconstruct CustomGridCNN
     custom_objects = {
@@ -124,6 +124,6 @@ if __name__ == "__main__":
 
     print(f"\n==========================================")
     print(f"Episode Completed in {step_count} Steps!")
-    print(f"Final Total Reward: {total_reward:.2f}")
-    print(f"Final Env Score: {getattr(env, 'total_score', 'N/A')}")
+    print(f"Final Total Model Reward: {total_reward:.2f}")
+    print(f"Final Env Score: {getattr(env, 'total_game_score', 'N/A')}")
     print(f"==========================================")
