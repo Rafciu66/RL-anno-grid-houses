@@ -12,13 +12,13 @@ from island_env import IslandCityEnv
 from contextlib import redirect_stdout
 from pathlib import Path
 import random
-GRID_HEIGHT = 10
-GRID_WIDTH = 10
+GRID_HEIGHT = 20
+GRID_WIDTH = 20
 class CustomGridCNN(BaseFeaturesExtractor):
     """Custom 2D CNN Feature Extractor."""
     def __init__(self, observation_space, features_dim=128):
         super().__init__(observation_space, features_dim)
-        n_input_channels = observation_space.shape[0]  # 5 channels
+        n_input_channels = observation_space.shape[0]  
 
         self.cnn = nn.Sequential(
             nn.Conv2d(n_input_channels, 32, kernel_size=3, padding=1),
@@ -135,13 +135,14 @@ def make_env(height=10, width=10, max_steps=60, start_seed = 0):
 
 
 if __name__ == "__main__":
-    TIME_STEPS = 100_000
+    TIME_STEPS = 1000_000
+    START_SEED = 5
     start_time = time.perf_counter()
     # 1. Spawn parallel CPU environments
     num_cpu = max(1, multiprocessing.cpu_count() - 2)
     print(f"Launching {num_cpu} parallel CPU environments...")
     
-    env = SubprocVecEnv([make_env(height=GRID_HEIGHT, width=GRID_WIDTH, max_steps=60, start_seed=0) for _ in range(num_cpu)])
+    env = SubprocVecEnv([make_env(height=GRID_HEIGHT, width=GRID_WIDTH, max_steps=60, start_seed=START_SEED) for _ in range(num_cpu)])
 
     # 2. Configure Custom CNN Policy kwargs
     policy_kwargs = dict(

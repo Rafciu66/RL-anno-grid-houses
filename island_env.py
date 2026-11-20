@@ -68,14 +68,15 @@ class IslandCityEnv(gym.Env):
             0 : "empty",
             1 : "road",
             2 : "house",
-            3 : "market",
+            3 : "market_wide",
+            5 : "market_tall",
             4 : "pub"
         })
         self.PUBLIC_BUILDING_RANGES = {
             "market": 4,
             "pub" : 4
         }
-        self.ACTION_BUILDINGS = ["road", "house", "market", "pub"]
+        self.ACTION_BUILDINGS = ["road", "house", "market_wide", "market_tall", "pub"]
         self.start_seed = start_seed
         self.base_score_change = 0
         self.BULIDING_SCORES = {
@@ -89,19 +90,21 @@ class IslandCityEnv(gym.Env):
         # Footprint sizes: (height, width)
         self.BUILDING_SIZES = {
             "road": (1, 1), # Road 
-            "house": (1, 1), # House 
-            "market": (2, 2),  # Market 
+            "house": (2, 2), # House 
+            "market_wide": (2, 3),  # Market 
+            "market_tall" : (3, 2),
             "pub" : (2, 2)
         }
         self.longest_bulding = 5
         self.BUIDLING_HANDLERS = {
             "road": self._handle_road,
             "house": self._handle_house,
-            "market": self._handle_market,
+            "market_wide": self._handle_market,
+            "market_tall" : self._handle_market,
             "pub" : self._handle_pub
         }
         # Action Space: 4 buildings * H * W
-        self.n_buildings = 4
+        self.n_buildings = len(self.ACTION_BUILDINGS)
         self.action_space = spaces.Discrete(self.n_buildings * self.H * self.W)
         
         # Observation Space: (6, H, W)
@@ -120,10 +123,10 @@ class IslandCityEnv(gym.Env):
         # 1 = Land, 0 = Water
         self.land_mask = np.ones((self.H, self.W), dtype=np.float32)
         
-        # Grid containing building IDs (0=empty, 1=road, 2=house, 3=market)
+        # Grid containing building IDs 
         self.building_grid = np.zeros((self.H, self.W), dtype=np.int8)
         
-        # Unique IDs map to track multi-tile house/market instances
+        # Unique IDs map to track multi-tile instances
         self.instance_grid = np.zeros((self.H, self.W), dtype=np.int32)
         self.next_instance_id = 1
         self.instances_dict = defaultdict(dict)
@@ -148,15 +151,15 @@ class IslandCityEnv(gym.Env):
             "west":  {"points": set(), "disabled": False}
         }
 
-        self.blueprint_mask = np.full((10, 10), None,  dtype=object) # holds info which actions each (empty) cell allows 
+        self.blueprint_mask = np.full((self.H, self.W), None,  dtype=object) # holds info which actions each (empty) cell allows 
         # SEEDED START: Pre-place 1 Market and 1 adjacent Road in the center
-        start_seed = (
-            self.np_random.integers(0, 7)
-            if self.start_seed == 0
-            else self.start_seed
-        )
+        # start_seed = (
+        #     self.np_random.integers(5, 7)
+        #     if self.start_seed == 0
+        #     else self.start_seed
+        # )
 
-        self._seeded_start(start_seed)
+        self._seeded_start(self.start_seed)
         
         #self._update_distances_and_score() 
         return self._get_obs(), {"action_mask": self.action_masks()}
@@ -171,7 +174,7 @@ class IslandCityEnv(gym.Env):
         
         # Normalize distance channel to [0, 1] relative to max scoring range (self.market_range)
 
-        for i, b_name in enumerate(["market", "pub"]): #market ranges, pub ranges
+        for i, b_name in enumerate(["market", "pub"]): # ranges
             road_only_dist_map = np.where(
             self.building_grid == 1,
             self.dist_maps[b_name],
@@ -531,14 +534,13 @@ class IslandCityEnv(gym.Env):
             "empty": " 🟩",  # Empty Land
             "road": " ⬛",  # Road
             "house": " 🏠",  # House (2x2)
-            "market": " 🏢",   # Market (3x3)
+            "market_wide": " 🏢",   # Market (3x3)
+            "market_tall" : " 🏢",
             "pub" : " 🍺"
         }
         
         print(f"\n--- Step: {self.current_step}/{self.max_steps} | Model score: {self.total_model_score:.2f}  | Game score: {self.total_game_score}---")
-        #RED = "\033[31m"
-        #GREEN = "\033[32m"
-        #RESET = "\033[0m"
+
         for y in range(self.H):
             row_str = ""
             for x in range(self.W):
@@ -546,12 +548,12 @@ class IslandCityEnv(gym.Env):
                 b_name = self.BUIDLING_IDS_NAMES_BMAP.get_name(b_id)
                 if b_name == "road":
                     s = str(int(self.dist_maps["market"][y, x]))
-                    row_str +=  s if len(s) >= 2 else str("0" + s)
+                    row_str +=  s if len(s) > 2 else (str("0" + s) if len(s) > 1 else str("00" + s))
                 elif b_name == "house":
                     s = str(int(self.instances_dict[self.instance_grid[y, x]]["distances"]["market"])) 
-                    row_str +=  s if len(s) >= 2 else str("0" + s)
+                    row_str +=  s if len(s) > 2 else (str("0" + s) if len(s) > 1 else str("00" + s))
                 else:
-                    row_str += "##"
+                    row_str += "###"
                 row_str += "|"
             print(row_str)
         print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
@@ -562,12 +564,12 @@ class IslandCityEnv(gym.Env):
                 b_name = self.BUIDLING_IDS_NAMES_BMAP.get_name(b_id)
                 if b_name == "road":
                     s = str(int(self.dist_maps["pub"][y, x]))
-                    row_str +=  s if len(s) >= 2 else str("0" + s)
+                    row_str +=  s if len(s) > 2 else (str("0" + s) if len(s) > 1 else str("00" + s))
                 elif b_name == "house":
                     s = str(int(self.instances_dict[self.instance_grid[y, x]]["distances"]["pub"])) 
-                    row_str +=  s if len(s) >= 2 else str("0" + s)
+                    row_str +=  s if len(s) > 2 else (str("0" + s) if len(s) > 1 else str("00" + s))
                 else:
-                    row_str += "##"
+                    row_str += "###"
                 row_str += "|"
             print(row_str)
         print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
@@ -582,26 +584,41 @@ class IslandCityEnv(gym.Env):
 
         if seed == 0:
             self._building_agent(0, 0, "road")
+
         elif seed == 1:
             self._building_agent(self.H - 1, 0, "road")
+
         elif seed == 2:
             self._building_agent(0, self.W - 1, "road")
+
         elif seed == 3:
             self._building_agent(self.H - 1, self.W - 1, "road")
+
         elif seed == 4:
             self._building_agent(mid_y, mid_x, "road")
+
         elif seed == 5:
             y = self.np_random.integers(0, self.H)
             x = self.np_random.integers(0, self.W)
             self._building_agent(y, x, "road")
+
         elif seed == 6:
-            for x in range(self.W):
-                self._building_agent(self.H // 2, x, "road")
-            for y in range(self.H // 2):
-                if self.building_grid[y, self.W // 2] == 0: 
-                    self._building_agent(y, self.W // 2, "road")
-            self._building_agent(mid_y - 1, mid_x - 1, "market")
+            # Place public buildings first
+            self._building_agent(mid_y - 4, mid_x + 2, "market_wide")
             self._building_agent(mid_y + 2, mid_x + 2, "pub")
+
+            # Horizontal road
+            for x in range(self.W):
+                y = self.H // 2
+                if self.building_grid[y, x] == 0 and self.land_mask[y, x] == 1:
+                    self._building_agent(y, x, "road")
+
+            # Vertical road
+            for y in range(self.H):
+                x = self.W // 2
+                if self.building_grid[y, x] == 0 and self.land_mask[y, x] == 1:
+                    self._building_agent(y, x, "road")
+
         elif seed == 7:
             self._building_agent(1, 5, "road")
 
@@ -664,9 +681,9 @@ class IslandCityEnv(gym.Env):
         for b_name in ["market", "pub"]:
             queue = deque()
             queue.append((start_y, start_x))
-            # BFS over roads that have new shortest connection to market
+            # BFS over roads that have new shortest connection to public_building
             while queue:
-                y, x = queue.popleft() # zrobic prawdziwy grid z tym które pole sąsiaduje z iloma bokami z innnym domem
+                y, x = queue.popleft() 
                 dist = self.dist_maps[b_name][y, x]
                 for dy, dx in [(-1,0), (1,0), (0,-1), (0,1)]: 
                     ny, nx = y + dy, x + dx
@@ -681,6 +698,8 @@ class IslandCityEnv(gym.Env):
 
                             old_reward = self._normalize_public_building_reward(old_dist, b_name)
                             new_reward = self._normalize_public_building_reward(new_dist, b_name)
+
+                            score_change = new_reward - old_reward
 
                             house_neighbors = self.instances_dict[self.instance_grid[ny, nx]]["neighbors"]["house"]
 
@@ -713,9 +732,10 @@ class IslandCityEnv(gym.Env):
                 normalized_reward_sum = 0
                 for b_name in ["market", "pub"]:
                     normalized_reward_sum += self._normalize_public_building_reward(neigh_instance["distances"][b_name], b_name)
-                prev_model_sum = building_cost + normalized_reward_sum * self.house_adj_bonus_mult ** neigh_instance["neighbors"]["house"] + self.house_adj_bonus_add * neigh_instance["neighbors"]["house"]
+                k = neigh_instance["neighbors"]["house"] / self.BUILDING_SIZES["house"][0]
+                prev_model_sum = building_cost + normalized_reward_sum * self.house_adj_bonus_mult ** k + self.house_adj_bonus_add * k
                 neigh_instance["neighbors"]["house"] += 1
-                new_model_sum = building_cost + normalized_reward_sum * self.house_adj_bonus_mult ** neigh_instance["neighbors"]["house"] + self.house_adj_bonus_add * neigh_instance["neighbors"]["house"]
+                new_model_sum = building_cost + normalized_reward_sum * self.house_adj_bonus_mult ** k + self.house_adj_bonus_add * k
                 model_score_change += new_model_sum - prev_model_sum
                 self.instances_dict[self.instance_grid[y,x]]["neighbors"]["house"] += 1
 
@@ -728,9 +748,10 @@ class IslandCityEnv(gym.Env):
                     min_dist = min(min_dist, self.dist_maps[b_name][ny, nx])
             self.instances_dict[self.instance_grid[y, x]]["distances"][b_name] = min_dist
             normalized_reward = self._normalize_public_building_reward(min_dist, b_name)
-            model_score_change += building_cost + normalized_reward * self.house_adj_bonus_mult ** self.instances_dict[self.instance_grid[y, x]]["neighbors"]["house"]
+            k  = self.instances_dict[self.instance_grid[y, x]]["neighbors"]["house"] / self.BUILDING_SIZES["house"][0]
+            model_score_change += building_cost + normalized_reward * self.house_adj_bonus_mult ** k
             self.total_game_score += normalized_reward
-        model_score_change += self.house_adj_bonus_add * self.instances_dict[self.instance_grid[y, x]]["neighbors"]["house"]
+        model_score_change += self.house_adj_bonus_add * k
         return model_score_change      
     
     def _handle_road(self, y, x) -> float:
@@ -746,7 +767,7 @@ class IslandCityEnv(gym.Env):
                     nb_name = self.BUIDLING_IDS_NAMES_BMAP.get_name(self.building_grid[ny, nx])
                     if nb_name == "road": #is next to other road:
                         min_dists[b_name] = min(min_dists[b_name], self.dist_maps[b_name][ny, nx] + 1)
-                    elif nb_name == b_name: #is next to market
+                    elif nb_name.startswith(b_name): #is next to market
                         min_dists[b_name] = 0
                     elif nb_name == "empty": #possible next road or building
                         self._update_extreme_points(ny,nx)
@@ -758,12 +779,13 @@ class IslandCityEnv(gym.Env):
 
         return model_score_change
 
-    def _calculate_public_building_effects(self, y, x, b_name):
-        model_score_change = self.base_score_change + self.BULIDING_SCORES[b_name]
+    def _calculate_public_building_effects(self, y, x, building_effect):
+        model_score_change = self.base_score_change + self.BULIDING_SCORES[building_effect]
+        b_name = self.BUIDLING_IDS_NAMES_BMAP.get_name(self.building_grid[y, x])
         bh, bw = self.BUILDING_SIZES[b_name]
         road_neighbours = self._get_orthogonal_neighbors(self.building_grid == self.BUIDLING_IDS_NAMES_BMAP.get_id("road"), y, x, bh, bw)
         for ny, nx in road_neighbours:
-            self.dist_maps[b_name][ny, nx] = 0
+            self.dist_maps[building_effect][ny, nx] = 0
             model_score_change += self._update_road_distances(ny, nx)
         return model_score_change
     

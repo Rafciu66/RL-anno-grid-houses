@@ -8,8 +8,8 @@ from sb3_contrib import MaskablePPO
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from island_env import IslandCityEnv
 
-GRID_HEIGHT = 10
-GRID_WIDTH = 10
+GRID_HEIGHT = 20
+GRID_WIDTH = 20
 
 # 1. Custom Feature Extractor required to load the policy
 class CustomGridCNN(BaseFeaturesExtractor):
